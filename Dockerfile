@@ -1,51 +1,34 @@
-# Multi-stage build for NestJS application
-FROM node:18-alpine AS builder
+FROM node:18-alpine
 
-# Set working directory
+# Install OpenSSL for Prisma compatibility
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY tsconfig*.json ./
 
-# Install dependencies
-RUN npm install && npm cache clean --force
+# Install ALL dependencies (including dev dependencies for hot reload)
+RUN npm install
+
+# Install NestJS CLI globally to ensure nest command is available
+RUN npm install -g @nestjs/cli
 
 # Copy source code
-COPY src/ ./src/
+COPY . .
 
-# Build the application
-RUN npm run build
+# Download Prisma engines for the platform
+RUN npx prisma generate --no-engine
+RUN npx prisma generate
 
-# Production stage
-FROM node:18-alpine AS production
+# Clean any existing build artifacts
+RUN rm -rf dist/
 
-# Set working directory
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install only production dependencies
-RUN npm install --omit=dev && npm cache clean --force
-
-# Copy built application from builder stage
-COPY --from=builder /app/dist ./dist
-
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nestjs -u 1001
-
-# Change ownership of the app directory
-RUN chown -R nestjs:nodejs /app
-USER nestjs
+# Build the application to create the nest executable
+RUN nest build
 
 # Expose port
-EXPOSE 3000
+EXPOSE 4004
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
-
-# Start the application
-CMD ["node", "dist/main.js"]
+# Start in development mode with hot reload
+CMD ["npm", "run", "start:with-db"]
